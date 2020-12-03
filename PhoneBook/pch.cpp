@@ -181,17 +181,26 @@ PhoneBookLine* getPhoneBookLine(wstring string)
 
 PhoneBookLine* getLineByPosition(FilePosition* position)
 {
+	PhoneBookLine* phoneBookLine;
 	HANDLE hFile = CreateFile(_path.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_READONLY, NULL);
 	int fileSize = GetFileSize(hFile, NULL);
 	HANDLE hMem = CreateFileMapping(hFile, NULL, PAGE_READONLY, 0, fileSize, NULL);
 
-	int outerOffset = position->outerOffset;
-	int innerOffset = position->innerOffset;
-	int lineSize = position->lineSize;
-	int frameMappingSize = outerOffset + FRAME_SIZE > fileSize ? fileSize - outerOffset : FRAME_SIZE;
-	char* mappedTextPtr = (char*)MapViewOfFile(hMem, FILE_MAP_READ, 0, outerOffset, frameMappingSize);
-	wstring ws(&mappedTextPtr[innerOffset], &mappedTextPtr[innerOffset + lineSize]);
-	PhoneBookLine* phoneBookLine = getPhoneBookLine(ws);
+	try {
+		int outerOffset = position->outerOffset;
+		int innerOffset = position->innerOffset;
+		int lineSize = position->lineSize;
+		int frameMappingSize = outerOffset + FRAME_SIZE > fileSize ? fileSize - outerOffset : FRAME_SIZE;
+		char* mappedTextPtr = (char*)MapViewOfFile(hMem, FILE_MAP_READ, 0, outerOffset, frameMappingSize);
+		wstring ws(&mappedTextPtr[innerOffset], &mappedTextPtr[innerOffset + lineSize]);
+		phoneBookLine = getPhoneBookLine(ws);
+		UnmapViewOfFile(mappedTextPtr);
+	}
+	catch(...)
+	{ }
+
+	CloseHandle(hFile);
+	CloseHandle(hMem);
 	return phoneBookLine;
 }
 
@@ -213,36 +222,40 @@ extern _declspec(dllexport) vector<PhoneBookLine*> loadPhonebook(wstring path, i
 	int fileMappingOffset = 0;
 	int linesCount = 0;
 	vector<wstring> records;
-	while (fileMappingOffset < fileSize)
-	{
-		int frameMappingSize = fileMappingOffset + FRAME_SIZE > fileSize ? fileSize - fileMappingOffset : FRAME_SIZE;
-		char* mappedTextPtr = (char*)MapViewOfFile(hMem, FILE_MAP_READ, 0, fileMappingOffset, frameMappingSize);
-		int offset = 0;
-		while (offset < frameMappingSize)
+	try {
+		while (fileMappingOffset < fileSize)
 		{
-			int i = 0;
-			while (offset + i < frameMappingSize && mappedTextPtr[offset + i] != '\n')
+			int frameMappingSize = fileMappingOffset + FRAME_SIZE > fileSize ? fileSize - fileMappingOffset : FRAME_SIZE;
+			char* mappedTextPtr = (char*)MapViewOfFile(hMem, FILE_MAP_READ, 0, fileMappingOffset, frameMappingSize);
+			int offset = 0;
+			while (offset < frameMappingSize)
 			{
-				i++;
+				int i = 0;
+				while (offset + i < frameMappingSize && mappedTextPtr[offset + i] != '\n')
+				{
+					i++;
+				}
+				wstring ws(&mappedTextPtr[offset], &mappedTextPtr[offset + i]);
+				phonebookElement = getPhoneBookLine(ws);
+				int currentPage = linesCount / LINES_ON_PAGE;
+				if (currentPage == page)
+					phonebook.push_back(phonebookElement);
+				if (!initialized)
+				{
+					FilePosition* filePostition = new FilePosition(currentPage, fileMappingOffset, offset, i);
+					StreetIndex->insert(&StreetIndex, phonebookElement->street, filePostition);
+					LastnameIndex->insert(&LastnameIndex, phonebookElement->lastname, filePostition);
+					PhonenumberIndex->insert(&PhonenumberIndex, phonebookElement->phonenumber, filePostition);
+				}
+				linesCount++;
+				offset += i + 1;
 			}
-			wstring ws(&mappedTextPtr[offset], &mappedTextPtr[offset + i]);
-			phonebookElement = getPhoneBookLine(ws);
-			int currentPage = linesCount / LINES_ON_PAGE;
-			if (currentPage == page)
-				phonebook.push_back(phonebookElement);
-			if (!initialized)
-			{
-				FilePosition* filePostition = new FilePosition(currentPage, fileMappingOffset, offset, i);
-				StreetIndex->insert(&StreetIndex, phonebookElement->street, filePostition);
-				LastnameIndex->insert(&LastnameIndex, phonebookElement->lastname, filePostition);
-				PhonenumberIndex->insert(&PhonenumberIndex, phonebookElement->phonenumber, filePostition);
-			}
-			linesCount++;
-			offset += i + 1;
+			fileMappingOffset += frameMappingSize;
+			UnmapViewOfFile(mappedTextPtr);
 		}
-		fileMappingOffset += frameMappingSize;
-		UnmapViewOfFile(mappedTextPtr);
 	}
+	catch(...)
+	{ }
 	CloseHandle(hMem);
 	CloseHandle(hFile);
 
