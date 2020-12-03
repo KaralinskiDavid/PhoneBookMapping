@@ -13,8 +13,8 @@
 #pragma comment(lib, "ComCtl32.Lib")
 
 #define MAX_LOADSTRING 100
-#define loadPhoneBook "?loadPhonebook@@YA?AV?$vector@PEAVPhoneBookLine@@V?$allocator@PEAVPhoneBookLine@@@std@@@std@@V?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@2@@Z"
-#define searchByindex "?searchByIndex@@YA?AV?$vector@PEAVPhoneBookLine@@V?$allocator@PEAVPhoneBookLine@@@std@@@std@@V?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@2@H@Z"
+#define loadPhoneBook "?loadPhonebook@@YA?AV?$vector@PEAVPhoneBookLine@@V?$allocator@PEAVPhoneBookLine@@@std@@@std@@V?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@2@H@Z"
+#define searchByindex "?searchByIndex@@YA?AV?$vector@PEAVPhoneBookLine@@V?$allocator@PEAVPhoneBookLine@@@std@@@std@@V?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@2@HH@Z"
 #define destroy "?destroyPhoneBook@@YAXXZ"
 
 HINSTANCE hInst;                                
@@ -22,14 +22,22 @@ WCHAR szTitle[MAX_LOADSTRING];
 WCHAR szWindowClass[MAX_LOADSTRING];            
 HWND hMainWindow;
 HWND hText;
+HWND hwndNavButton1;
+HWND hwndNavButton2;
 std::wstring ListItem = L"Lastname";
 const std::vector<std::wstring> columnsName{ L"Phonenumber", L"Lastname", L"Name", L"Surname", L"Street", L"House", L"Corpus", L"Flat" };
+std::wstring path = L"..\\Database.txt";
 std::vector<PhoneBookLine*> PhoneBook;
+int currentPage = 0;
+int currentResultPage = 0;
+int currentIndexType = 0;
+wstring currentIndexValue;
+bool isSearchResult = false;
 
 
 HMODULE hLib = LoadLibrary(L"PhoneBook.dll");
-typedef std::vector<PhoneBookLine*>(*PhL)(std::wstring);
-typedef std::vector<PhoneBookLine*>(*Srch)(std::wstring, int);
+typedef std::vector<PhoneBookLine*>(*PhL)(std::wstring, int);
+typedef std::vector<PhoneBookLine*>(*Srch)(std::wstring, int, int);
 typedef void (*Dstr)();
 Dstr destroyPhonebook = (Dstr)GetProcAddress(hLib, destroy);
 PhL loadDatabase = (PhL)GetProcAddress(hLib, loadPhoneBook);
@@ -150,6 +158,27 @@ void CreateShowAllButton(HWND hWndParent)
     ShowWindow(hwndButton, SW_SHOWDEFAULT);
 }
 
+void CreateNavigationButtons(HWND hWndParent)
+{
+    hwndNavButton1 = CreateWindow(
+        WC_BUTTON,
+        L"<",
+        WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
+        1350, 0, 20, 25,
+        hWndParent,
+        (HMENU)11113,
+        (HINSTANCE)GetWindowLongPtr(hWndParent, GWLP_HINSTANCE), NULL);
+    hwndNavButton2 = CreateWindow(
+        WC_BUTTON,
+        L">",
+        WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
+        1370, 0, 20, 25, hWndParent,
+        (HMENU)11114,
+        (HINSTANCE)GetWindowLongPtr(hWndParent, GWLP_HINSTANCE), NULL);
+    ShowWindow(hwndNavButton1, SW_SHOWDEFAULT);
+    ShowWindow(hwndNavButton2, SW_SHOWDEFAULT);
+}
+
 void CreateColumns(HWND hWndListView)
 {
     RECT windowRect;
@@ -255,8 +284,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     {
         hWndListView = CreateListView(hWnd);
         CreateColumns(hWndListView);
-        PhoneBook = loadDatabase(L"..\\T2.txt");
-        //PhoneBook = loadDatabase(L"B:\\University\\Test\\Database.txt");
+        PhoneBook = loadDatabase(path, currentPage);
         FillListView(hWndListView, PhoneBook);
         ShowWindow(hWndListView, SW_SHOWDEFAULT);
         CreateComboBox(hWnd);
@@ -264,6 +292,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         hText = CreateTextBox(hWnd);
         CreateSearchButton(hWnd);
         CreateShowAllButton(hWnd);
+        CreateNavigationButtons(hWnd);
+        EnableWindow(hwndNavButton1, false);
     }
     case WM_COMMAND:
         if (HIWORD(wParam) == CBN_SELCHANGE)
@@ -276,20 +306,91 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             TCHAR buff[1024];
             GetWindowText(hText, buff, 1024);
             ListView_DeleteAllItems(hWndListView);
-            std::vector<PhoneBookLine*> lines;
+            currentIndexValue = buff;
             if (lstrcmpW(ListItem.c_str(), L"Phone Number") == 0)
-                lines = searchByIndex(buff, 2);
+            {
+                isSearchResult = true;
+                currentIndexType = 2;
+                PhoneBook = searchByIndex(currentIndexValue, currentIndexType, currentResultPage);
+            }
             if (lstrcmpW(ListItem.c_str(), L"Street") == 0)
-                lines = searchByIndex(buff, 1);
+            {
+                isSearchResult = true;
+                currentIndexType = 1;
+                PhoneBook = searchByIndex(currentIndexValue, currentIndexType, currentResultPage);
+            }
             if (lstrcmpW(ListItem.c_str(), L"Lastname") == 0)
-                lines = searchByIndex(buff, 0);
-            FillListView(hWndListView, std::vector<PhoneBookLine*>{lines});
+            {
+                isSearchResult = true;
+                currentIndexType = 0;
+                PhoneBook = searchByIndex(currentIndexValue, currentIndexType, currentResultPage);
+            }
+            EnableWindow(hwndNavButton1, false);
+            if(PhoneBook.size()>0)
+                EnableWindow(hwndNavButton2, true);
+            FillListView(hWndListView, PhoneBook);
             UpdateWindow(hWndListView);
         }
         if (LOWORD(wParam) == 11112)
         {
+            PhoneBook = loadDatabase(path, currentPage);
+            isSearchResult = false;
+            currentResultPage = 0;
+            if(currentPage>0)
+                EnableWindow(hwndNavButton1, true);
+            EnableWindow(hwndNavButton2, true);
             FillListView(hWndListView, PhoneBook);
             UpdateWindow(hWndListView);
+        }
+        if (LOWORD(wParam) == 11113)
+        {
+            if (!isSearchResult)
+            {
+                currentPage--;
+                PhoneBook = loadDatabase(path, currentPage);
+                if (currentPage == 0)
+                    EnableWindow(hwndNavButton1, false);
+                EnableWindow(hwndNavButton2, true);
+            }
+            else
+            {
+                currentResultPage--;
+                PhoneBook = searchByIndex(currentIndexValue, currentIndexType, currentResultPage);
+                if (currentResultPage == 0)
+                    EnableWindow(hwndNavButton1, false);
+                EnableWindow(hwndNavButton2, true);
+            }
+            FillListView(hWndListView, PhoneBook);
+        }
+        if (LOWORD(wParam) == 11114)
+        {
+            if (!isSearchResult)
+            {
+                currentPage++;
+                PhoneBook = loadDatabase(path, currentPage);
+                if (PhoneBook.size() == 0)
+                {
+                    currentPage--;
+                    EnableWindow(hwndNavButton2, false);
+                    PhoneBook = loadDatabase(path, currentPage);
+                }
+                if (currentPage > 0)
+                    EnableWindow(hwndNavButton1, true);
+            }
+            else
+            {
+                currentResultPage++;
+                PhoneBook = searchByIndex(currentIndexValue, currentIndexType, currentResultPage);
+                if (PhoneBook.size() == 0)
+                {
+                    currentResultPage--;
+                    EnableWindow(hwndNavButton2, false);
+                    PhoneBook = searchByIndex(currentIndexValue, currentIndexType, currentResultPage);
+                }
+                if (currentResultPage > 0)
+                    EnableWindow(hwndNavButton1, true);
+            }
+            FillListView(hWndListView, PhoneBook);
         }
         break;
     case WM_PAINT:

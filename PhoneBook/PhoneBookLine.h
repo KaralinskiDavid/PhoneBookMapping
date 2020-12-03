@@ -27,5 +27,4 @@ public:
 	int house;
 	int corpus;
 	int flat;
-
 };

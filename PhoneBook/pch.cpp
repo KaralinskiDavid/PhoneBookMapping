@@ -4,13 +4,16 @@
 #include <iostream>
 #include <fstream>
 #include <locale>
-
 #include "PhoneBookLine.h"
 
 #define FRAME_SIZE 65536
+#define LINES_ON_PAGE 30
 
 
 using namespace std;
+
+bool initialized = false;
+wstring _path;
 
 class FilePosition
 {
@@ -133,7 +136,6 @@ vector<D*> Node<K,D>::getNodesByKey(Node* root, K key)
 	return lines;
 }
 
-
 vector<wstring> splitline(wstring line, wstring delimiter)
 {
 	vector<wstring> substrings;
@@ -177,22 +179,39 @@ PhoneBookLine* getPhoneBookLine(wstring string)
 	return phonebookElement;
 }
 
+PhoneBookLine* getLineByPosition(FilePosition* position)
+{
+	HANDLE hFile = CreateFile(_path.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_READONLY, NULL);
+	int fileSize = GetFileSize(hFile, NULL);
+	HANDLE hMem = CreateFileMapping(hFile, NULL, PAGE_READONLY, 0, fileSize, NULL);
+
+	int outerOffset = position->outerOffset;
+	int innerOffset = position->innerOffset;
+	int lineSize = position->lineSize;
+	int frameMappingSize = outerOffset + FRAME_SIZE > fileSize ? fileSize - outerOffset : FRAME_SIZE;
+	char* mappedTextPtr = (char*)MapViewOfFile(hMem, FILE_MAP_READ, 0, outerOffset, frameMappingSize);
+	wstring ws(&mappedTextPtr[innerOffset], &mappedTextPtr[innerOffset + lineSize]);
+	PhoneBookLine* phoneBookLine = getPhoneBookLine(ws);
+	return phoneBookLine;
+}
+
 Node<wstring, FilePosition>* StreetIndex = NULL;
 Node<wstring, FilePosition>* LastnameIndex = NULL;
 Node<wstring, FilePosition>* PhonenumberIndex = NULL;
 
 
-extern _declspec(dllexport) vector<PhoneBookLine*> loadPhonebook(wstring path)
+extern _declspec(dllexport) vector<PhoneBookLine*> loadPhonebook(wstring path, int page)
 {
+	_path = path;
 	PhoneBookLine* phonebookElement;
 	vector<PhoneBookLine*> phonebook;
 
 	HANDLE hFile = CreateFile(path.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_READONLY, NULL);
 	int fileSize = GetFileSize(hFile, NULL);
 	HANDLE hMem = CreateFileMapping(hFile, NULL, PAGE_READONLY, 0, fileSize, NULL);
-	//int outerOffset = 0;
 
 	int fileMappingOffset = 0;
+	int linesCount = 0;
 	vector<wstring> records;
 	while (fileMappingOffset < fileSize)
 	{
@@ -202,18 +221,23 @@ extern _declspec(dllexport) vector<PhoneBookLine*> loadPhonebook(wstring path)
 		while (offset < frameMappingSize)
 		{
 			int i = 0;
-			while (mappedTextPtr[offset + i] != '\n' && offset + i < frameMappingSize - 1)
+			while (offset + i < frameMappingSize && mappedTextPtr[offset + i] != '\n')
 			{
 				i++;
 			}
 			wstring ws(&mappedTextPtr[offset], &mappedTextPtr[offset + i]);
 			phonebookElement = getPhoneBookLine(ws);
-			phonebook.push_back(phonebookElement);
-			FilePosition* filePostition = new FilePosition(1, fileMappingOffset, offset, i);
-			StreetIndex->insert(&StreetIndex, phonebookElement->street, filePostition);
-			LastnameIndex->insert(&LastnameIndex, phonebookElement->lastname, filePostition);
-			PhonenumberIndex->insert(&PhonenumberIndex, phonebookElement->phonenumber, filePostition);
-			//records.push_back(ws);
+			int currentPage = linesCount / LINES_ON_PAGE;
+			if (currentPage == page)
+				phonebook.push_back(phonebookElement);
+			if (!initialized)
+			{
+				FilePosition* filePostition = new FilePosition(currentPage, fileMappingOffset, offset, i);
+				StreetIndex->insert(&StreetIndex, phonebookElement->street, filePostition);
+				LastnameIndex->insert(&LastnameIndex, phonebookElement->lastname, filePostition);
+				PhonenumberIndex->insert(&PhonenumberIndex, phonebookElement->phonenumber, filePostition);
+			}
+			linesCount++;
 			offset += i + 1;
 		}
 		fileMappingOffset += frameMappingSize;
@@ -222,6 +246,7 @@ extern _declspec(dllexport) vector<PhoneBookLine*> loadPhonebook(wstring path)
 	CloseHandle(hMem);
 	CloseHandle(hFile);
 
+	initialized = true;
 	return phonebook;
 }
 
@@ -232,45 +257,34 @@ typedef enum IndexTypes
 	PHONENUMBER_INDEX
 } IndexTypes;
 
-vector<PhoneBookLine*> searchByFilePostition(vector<FilePosition*> positions)
+vector<PhoneBookLine*> searchByFilePostition(vector<FilePosition*> positions, int page)
 {
-	wstring path = L"..\\T2.txt";
 	vector<PhoneBookLine*> lines;
-
-	HANDLE hFile = CreateFile(path.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_READONLY, NULL);
-	int fileSize = GetFileSize(hFile, NULL);
-	HANDLE hMem = CreateFileMapping(hFile, NULL, PAGE_READONLY, 0, fileSize, NULL);
-
-	for (int i = 0; i < positions.size(); i++)
+	int lowLimit = page * LINES_ON_PAGE;
+	int highLimit = positions.size() > lowLimit + LINES_ON_PAGE ? lowLimit + LINES_ON_PAGE : positions.size();
+	for (int i = lowLimit; i < highLimit; i++)
 	{
-		int outerOffset = positions[i]->outerOffset;
-		int innerOffset = positions[i]->innerOffset;
-		int lineSize = positions[i]->lineSize;
-		int frameMappingSize = outerOffset + FRAME_SIZE > fileSize ? fileSize - outerOffset : FRAME_SIZE;
-		char* mappedTextPtr = (char*)MapViewOfFile(hMem, FILE_MAP_READ, 0, outerOffset, frameMappingSize);
-		wstring ws(&mappedTextPtr[innerOffset], &mappedTextPtr[innerOffset + lineSize]);
-		PhoneBookLine* phoneBookLine = getPhoneBookLine(ws);
-		lines.push_back(phoneBookLine);
+		lines.push_back(getLineByPosition(positions[i]));
 	}
 	return lines;
 }
 
 
-extern _declspec(dllexport) vector<PhoneBookLine*> searchByIndex(wstring index, int indextype)
+extern _declspec(dllexport) vector<PhoneBookLine*> searchByIndex(wstring index, int indextype, int page)
 {
 	switch (indextype)
 	{
 		case STREET_INDEX:
 		{
-			return searchByFilePostition(StreetIndex->getNodesByKey(StreetIndex, index));
+			return searchByFilePostition(StreetIndex->getNodesByKey(StreetIndex, index), page);
 		}
 		case LASTNAME_INDEX:
 		{
-			return searchByFilePostition(LastnameIndex->getNodesByKey(StreetIndex, index));
+			return searchByFilePostition(LastnameIndex->getNodesByKey(LastnameIndex, index),page);
 		}
 		case PHONENUMBER_INDEX:
 		{
-			return searchByFilePostition(PhonenumberIndex->getNodesByKey(StreetIndex, index));
+			return searchByFilePostition(PhonenumberIndex->getNodesByKey(PhonenumberIndex, index),page);
 		}
 	}
 }
