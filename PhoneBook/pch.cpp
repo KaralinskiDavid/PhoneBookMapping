@@ -4,6 +4,7 @@
 #include <iostream>
 #include <fstream>
 #include <locale>
+#include <algorithm>
 #include "PhoneBookLine.h"
 
 #define FRAME_SIZE 65536
@@ -18,10 +19,10 @@ wstring _path;
 class FilePosition
 {
 public:
-	int pageNumber;
-	int outerOffset;
-	int innerOffset;
-	int lineSize;
+	unsigned int pageNumber;
+	unsigned int outerOffset;
+	unsigned int innerOffset;
+	unsigned int lineSize;
 	FilePosition(int pageNumber, int outerOffset, int innerOffset, int lineSize);
 };
 
@@ -204,9 +205,9 @@ PhoneBookLine* getLineByPosition(FilePosition* position)
 	return phoneBookLine;
 }
 
-Node<wstring, FilePosition>* StreetIndex = NULL;
-Node<wstring, FilePosition>* LastnameIndex = NULL;
-Node<wstring, FilePosition>* PhonenumberIndex = NULL;
+Node<size_t, FilePosition>* StreetIndex = NULL;
+Node<size_t, FilePosition>* LastnameIndex = NULL;
+Node<size_t, FilePosition>* PhonenumberIndex = NULL;
 
 
 extern _declspec(dllexport) vector<PhoneBookLine*> loadPhonebook(wstring path, int page)
@@ -222,6 +223,7 @@ extern _declspec(dllexport) vector<PhoneBookLine*> loadPhonebook(wstring path, i
 	int fileMappingOffset = 0;
 	int linesCount = 0;
 	vector<wstring> records;
+	hash<wstring> hash;
 	try {
 		while (fileMappingOffset < fileSize)
 		{
@@ -243,9 +245,9 @@ extern _declspec(dllexport) vector<PhoneBookLine*> loadPhonebook(wstring path, i
 				if (!initialized)
 				{
 					FilePosition* filePostition = new FilePosition(currentPage, fileMappingOffset, offset, i);
-					StreetIndex->insert(&StreetIndex, phonebookElement->street, filePostition);
-					LastnameIndex->insert(&LastnameIndex, phonebookElement->lastname, filePostition);
-					PhonenumberIndex->insert(&PhonenumberIndex, phonebookElement->phonenumber, filePostition);
+					StreetIndex->insert(&StreetIndex, hash(phonebookElement->street), filePostition);
+					LastnameIndex->insert(&LastnameIndex, hash(phonebookElement->lastname), filePostition);
+					PhonenumberIndex->insert(&PhonenumberIndex, hash(phonebookElement->phonenumber), filePostition);
 				}
 				linesCount++;
 				offset += i + 1;
@@ -285,24 +287,25 @@ vector<PhoneBookLine*> searchByFilePostition(vector<FilePosition*> positions, in
 
 extern _declspec(dllexport) vector<PhoneBookLine*> searchByIndex(wstring index, int indextype, int page)
 {
+	hash<wstring> hash;
 	switch (indextype)
 	{
 		case STREET_INDEX:
 		{
-			return searchByFilePostition(StreetIndex->getNodesByKey(StreetIndex, index), page);
+			return searchByFilePostition(StreetIndex->getNodesByKey(StreetIndex, hash(index)), page);
 		}
 		case LASTNAME_INDEX:
 		{
-			return searchByFilePostition(LastnameIndex->getNodesByKey(LastnameIndex, index),page);
+			return searchByFilePostition(LastnameIndex->getNodesByKey(LastnameIndex, hash(index)),page);
 		}
 		case PHONENUMBER_INDEX:
 		{
-			return searchByFilePostition(PhonenumberIndex->getNodesByKey(PhonenumberIndex, index),page);
+			return searchByFilePostition(PhonenumberIndex->getNodesByKey(PhonenumberIndex, hash(index)),page);
 		}
 	}
 }
 
-void destroy(Node<wstring, FilePosition>* node, bool isFirst=false)
+void destroy(Node<size_t, FilePosition>* node, bool isFirst=false)
 {
 	if (node != NULL)
 	{
